@@ -1,0 +1,29 @@
+Company: {company_name}
+
+Dimension:
+
+{
+    "dimension_id": "DG2",
+    "title": "Committees, Decision Rights & Escalation",
+    "scope": [
+    "Governance committee types and council structures",
+    "Governance Steering Committees",
+    "Data Officers Advisory Boards",
+    "Formal mandates and decision rights",
+    "Conflict resolution and escalation mechanisms"
+    ],
+    "mechanisms": [
+    "Cross-functional committees",
+    "Strategic and operational councils",
+    "Documented decision rules",
+    "Defined escalation paths"
+    ],
+    "keywords": [
+    "Committees",
+    "Council",
+    "Governance Steering Committee",
+    "Decision Rights",
+    "Escalation",
+    "Mandate"
+    ]
+}

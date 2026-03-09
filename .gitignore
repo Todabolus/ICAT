@@ -1,0 +1,35 @@
+# Environment & secrets
+.env
+*.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Claude
+.claudeignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Lock files (optional - keep uv.lock, exclude others)
+package-lock.json

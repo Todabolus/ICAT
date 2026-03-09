@@ -1,0 +1,42 @@
+Company: {company_name}
+
+Dimension:
+
+{
+    "dimension_id": "DG1",
+    "title": "Governance Operating Model & Organizational Embedding",
+    "scope": [
+    "Centralized, federated or decentralized governance structures",
+    "Establishment of a Data Office or Data Governance Council",
+    "Executive mandate and management alignment",
+    "Governance structured by domain, system/source, or data flow",
+    "End-to-end versus segmented governance (e.g., BI, DWH, Data Lake)",
+    "Integration of internal and external data sources"
+    ],
+    "structural_options": {
+    "operating_model": [
+        "Centralized (Data Office with formal mandate)",
+        "Federated",
+        "Decentralized",
+        "Hybrid"
+    ],
+    "steering_logic": [
+        "Domain-oriented",
+        "System/source-based",
+        "End-to-end data flow",
+        "Segmented governance"
+    ]
+    },
+    "keywords": [
+    "Centralized",
+    "Federated",
+    "Decentralized",
+    "Chief Data Officer",
+    "Data Governance Council",
+    "Domain-Oriented",
+    "Data Flow",
+    "ETL",
+    "Data Source",
+    "External Data"
+    ]
+} 
