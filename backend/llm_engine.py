@@ -44,6 +44,7 @@ def _load_project_config() -> dict:
 
 _PROJECT_CONFIG = _load_project_config()
 DEFAULT_MODEL = _PROJECT_CONFIG.get("model", {}).get("name", "gpt-5-mini")
+PARALLEL_LLM = _PROJECT_CONFIG.get("workflow", {}).get("parallel", True)
 
 
 # --- LLM-Factory ---
@@ -106,11 +107,16 @@ async def run_workflow_async(company_name: str, config: dict) -> dict:
     dimensions_user_2 = _load("dimensions_user_2.txt").replace("{company_name}", company_name)
     financial_user = _load("financial_webscraper_user.txt").replace("{company_name}", company_name)
 
-    dimensions_1, dimensions_2, financial = await asyncio.gather(
-        _call(llm_search, dimensions_system, dimensions_user_1),
-        _call(llm_search, dimensions_system, dimensions_user_2),
-        _call(llm_search, _load("financial_webscraper_system.txt"), financial_user),
-    )
+    if PARALLEL_LLM:
+        dimensions_1, dimensions_2, financial = await asyncio.gather(
+            _call(llm_search, dimensions_system, dimensions_user_1),
+            _call(llm_search, dimensions_system, dimensions_user_2),
+            _call(llm_search, _load("financial_webscraper_system.txt"), financial_user),
+        )
+    else:
+        dimensions_1 = await _call(llm_search, dimensions_system, dimensions_user_1)
+        dimensions_2 = await _call(llm_search, dimensions_system, dimensions_user_2)
+        financial = await _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)
 
     synthesis_user = (
         _load("business_value_analyst_user.txt")
@@ -141,28 +147,42 @@ async def run_workflow_stream(company_name: str, config: dict):
     dimensions_user_2 = _load("dimensions_user_2.txt").replace("{company_name}", company_name)
     financial_user = _load("financial_webscraper_user.txt").replace("{company_name}", company_name)
 
-    tasks = {
-        "dimensions_1": asyncio.create_task(
-            _call(llm_search, dimensions_system, dimensions_user_1)
-        ),
-        "dimensions_2": asyncio.create_task(
-            _call(llm_search, dimensions_system, dimensions_user_2)
-        ),
-        "financial_webscraper": asyncio.create_task(
-            _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)
-        ),
-    }
-
     results = {}
-    pending = set(tasks.values())
-    task_to_name = {v: k for k, v in tasks.items()}
 
-    while pending:
-        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-        for task in done:
-            name = task_to_name[task]
+    if PARALLEL_LLM:
+        tasks = {
+            "dimensions_1": asyncio.create_task(
+                _call(llm_search, dimensions_system, dimensions_user_1)
+            ),
+            "dimensions_2": asyncio.create_task(
+                _call(llm_search, dimensions_system, dimensions_user_2)
+            ),
+            "financial_webscraper": asyncio.create_task(
+                _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)
+            ),
+        }
+
+        pending = set(tasks.values())
+        task_to_name = {v: k for k, v in tasks.items()}
+
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                name = task_to_name[task]
+                try:
+                    data = task.result()
+                    results[name] = data
+                    yield json.dumps({"type": "step_done", "step": name, "data": data})
+                except Exception as e:
+                    yield json.dumps({"type": "step_error", "step": name, "message": str(e)})
+    else:
+        for name, coro in [
+            ("dimensions_1", _call(llm_search, dimensions_system, dimensions_user_1)),
+            ("dimensions_2", _call(llm_search, dimensions_system, dimensions_user_2)),
+            ("financial_webscraper", _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)),
+        ]:
             try:
-                data = task.result()
+                data = await coro
                 results[name] = data
                 yield json.dumps({"type": "step_done", "step": name, "data": data})
             except Exception as e:
