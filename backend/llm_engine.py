@@ -46,6 +46,7 @@ _PROJECT_CONFIG = _load_project_config()
 DEFAULT_MODEL = _PROJECT_CONFIG.get("model", {}).get("name", "gpt-5-mini")
 PARALLEL_LLM = _PROJECT_CONFIG.get("workflow", {}).get("parallel", True)
 SEARCH_MODE = _PROJECT_CONFIG.get("workflow", {}).get("search", "full")
+SEARCH_CONTEXT = _PROJECT_CONFIG.get("workflow", {}).get("search_context", "medium")
 
 
 # --- LLM-Factory ---
@@ -68,7 +69,7 @@ def _build_llm(config: dict, use_search: bool = False):
         llm = ChatOpenAI(**kwargs)
 
     if use_search:
-        llm = llm.bind_tools([{"type": "web_search_preview"}])
+        llm = llm.bind_tools([{"type": "web_search_preview", "search_context_size": SEARCH_CONTEXT}])
 
     return llm
 

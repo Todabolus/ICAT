@@ -4,3 +4,4 @@ name = "gpt-4o-mini"
 [workflow]
 parallel = true
 search = "full" # "full" | "financial_only" | "none"
+search_context = "medium" # "low" | "medium" | "high"
