@@ -3,3 +3,4 @@ name = "gpt-4o-mini"
 
 [workflow]
 parallel = true
+search = "full" # "full" | "financial_only" | "none"

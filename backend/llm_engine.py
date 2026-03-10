@@ -45,6 +45,7 @@ def _load_project_config() -> dict:
 _PROJECT_CONFIG = _load_project_config()
 DEFAULT_MODEL = _PROJECT_CONFIG.get("model", {}).get("name", "gpt-5-mini")
 PARALLEL_LLM = _PROJECT_CONFIG.get("workflow", {}).get("parallel", True)
+SEARCH_MODE = _PROJECT_CONFIG.get("workflow", {}).get("search", "full")
 
 
 # --- LLM-Factory ---
@@ -98,8 +99,20 @@ async def _call(llm, system: str, user: str) -> str:
 
 # --- Haupt-Workflow ---
 
-async def run_workflow_async(company_name: str, config: dict) -> dict:
+def _search_llms(config: dict):
+    """Returns (llm_dimensions, llm_financial) based on SEARCH_MODE."""
+    llm_plain = _build_llm(config, use_search=False)
     llm_search = _build_llm(config, use_search=True)
+    if SEARCH_MODE == "none":
+        return llm_plain, llm_plain
+    if SEARCH_MODE == "financial_only":
+        return llm_plain, llm_search
+    # "full" (default)
+    return llm_search, llm_search
+
+
+async def run_workflow_async(company_name: str, config: dict) -> dict:
+    llm_dim, llm_fin = _search_llms(config)
     llm = _build_llm(config, use_search=False)
 
     dimensions_system = _load("dimensions_system.txt")
@@ -109,14 +122,14 @@ async def run_workflow_async(company_name: str, config: dict) -> dict:
 
     if PARALLEL_LLM:
         dimensions_1, dimensions_2, financial = await asyncio.gather(
-            _call(llm_search, dimensions_system, dimensions_user_1),
-            _call(llm_search, dimensions_system, dimensions_user_2),
-            _call(llm_search, _load("financial_webscraper_system.txt"), financial_user),
+            _call(llm_dim, dimensions_system, dimensions_user_1),
+            _call(llm_dim, dimensions_system, dimensions_user_2),
+            _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user),
         )
     else:
-        dimensions_1 = await _call(llm_search, dimensions_system, dimensions_user_1)
-        dimensions_2 = await _call(llm_search, dimensions_system, dimensions_user_2)
-        financial = await _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)
+        dimensions_1 = await _call(llm_dim, dimensions_system, dimensions_user_1)
+        dimensions_2 = await _call(llm_dim, dimensions_system, dimensions_user_2)
+        financial = await _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
 
     synthesis_user = (
         _load("business_value_analyst_user.txt")
@@ -139,7 +152,7 @@ async def run_workflow_async(company_name: str, config: dict) -> dict:
 
 async def run_workflow_stream(company_name: str, config: dict):
     """Async generator that yields SSE-ready JSON strings as each step completes."""
-    llm_search = _build_llm(config, use_search=True)
+    llm_dim, llm_fin = _search_llms(config)
     llm = _build_llm(config, use_search=False)
 
     dimensions_system = _load("dimensions_system.txt")
@@ -152,13 +165,13 @@ async def run_workflow_stream(company_name: str, config: dict):
     if PARALLEL_LLM:
         tasks = {
             "dimensions_1": asyncio.create_task(
-                _call(llm_search, dimensions_system, dimensions_user_1)
+                _call(llm_dim, dimensions_system, dimensions_user_1)
             ),
             "dimensions_2": asyncio.create_task(
-                _call(llm_search, dimensions_system, dimensions_user_2)
+                _call(llm_dim, dimensions_system, dimensions_user_2)
             ),
             "financial_webscraper": asyncio.create_task(
-                _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)
+                _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
             ),
         }
 
@@ -177,9 +190,9 @@ async def run_workflow_stream(company_name: str, config: dict):
                     yield json.dumps({"type": "step_error", "step": name, "message": str(e)})
     else:
         for name, coro in [
-            ("dimensions_1", _call(llm_search, dimensions_system, dimensions_user_1)),
-            ("dimensions_2", _call(llm_search, dimensions_system, dimensions_user_2)),
-            ("financial_webscraper", _call(llm_search, _load("financial_webscraper_system.txt"), financial_user)),
+            ("dimensions_1", _call(llm_dim, dimensions_system, dimensions_user_1)),
+            ("dimensions_2", _call(llm_dim, dimensions_system, dimensions_user_2)),
+            ("financial_webscraper", _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)),
         ]:
             try:
                 data = await coro
