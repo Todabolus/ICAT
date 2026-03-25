@@ -1,0 +1,10 @@
+Company: {company_name}
+
+Dimension:
+
+{
+    "dimension_id": "DG8",
+    "title": "TODO — Placeholder",
+    "scope": [],
+    "keywords": []
+}

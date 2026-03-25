@@ -5,6 +5,4 @@
 {financial_webscraper}
 
 # Support Opportunities
-{dimensions_1}
-
-{dimensions_2}
+{dimensions}

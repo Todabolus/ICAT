@@ -48,6 +48,18 @@ PARALLEL_LLM = _PROJECT_CONFIG.get("workflow", {}).get("parallel", True)
 SEARCH_MODE = _PROJECT_CONFIG.get("workflow", {}).get("search", "full")
 SEARCH_CONTEXT = _PROJECT_CONFIG.get("workflow", {}).get("search_context", "medium")
 
+# Dimension prompt files in order — add new files here to extend the pipeline
+DIMENSION_FILES = [
+    "dimensions_user.txt",
+    "dimensions_user_2.txt",
+    "dimensions_user_3.txt",
+    "dimensions_user_4.txt",
+    "dimensions_user_5.txt",
+    "dimensions_user_6.txt",
+    "dimensions_user_7.txt",
+    "dimensions_user_8.txt",
+]
+
 
 # --- LLM-Factory ---
 
@@ -117,33 +129,34 @@ async def run_workflow_async(company_name: str, config: dict) -> dict:
     llm = _build_llm(config, use_search=False)
 
     dimensions_system = _load("dimensions_system.txt")
-    dimensions_user_1 = _load("dimensions_user.txt").replace("{company_name}", company_name)
-    dimensions_user_2 = _load("dimensions_user_2.txt").replace("{company_name}", company_name)
+    dimension_users = [
+        _load(f).replace("{company_name}", company_name)
+        for f in DIMENSION_FILES
+    ]
     financial_user = _load("financial_webscraper_user.txt").replace("{company_name}", company_name)
 
     if PARALLEL_LLM:
-        dimensions_1, dimensions_2, financial = await asyncio.gather(
-            _call(llm_dim, dimensions_system, dimensions_user_1),
-            _call(llm_dim, dimensions_system, dimensions_user_2),
+        *dim_results, financial = await asyncio.gather(
+            *[_call(llm_dim, dimensions_system, u) for u in dimension_users],
             _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user),
         )
     else:
-        dimensions_1 = await _call(llm_dim, dimensions_system, dimensions_user_1)
-        dimensions_2 = await _call(llm_dim, dimensions_system, dimensions_user_2)
+        dim_results = []
+        for u in dimension_users:
+            dim_results.append(await _call(llm_dim, dimensions_system, u))
         financial = await _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
 
+    dimensions_combined = "\n\n".join(dim_results)
     synthesis_user = (
         _load("business_value_analyst_user.txt")
         .replace("{company_name}", company_name)
         .replace("{financial_webscraper}", financial)
-        .replace("{dimensions_1}", dimensions_1)
-        .replace("{dimensions_2}", dimensions_2)
+        .replace("{dimensions}", dimensions_combined)
     )
     synthesis = await _call(llm, _load("business_value_analyst_system.txt"), synthesis_user)
 
     return {
-        "dimensions_1": dimensions_1,
-        "dimensions_2": dimensions_2,
+        **{f"dimension_{i+1}": r for i, r in enumerate(dim_results)},
         "financial_webscraper": financial,
         "synthesis": synthesis,
     }
@@ -157,24 +170,26 @@ async def run_workflow_stream(company_name: str, config: dict):
     llm = _build_llm(config, use_search=False)
 
     dimensions_system = _load("dimensions_system.txt")
-    dimensions_user_1 = _load("dimensions_user.txt").replace("{company_name}", company_name)
-    dimensions_user_2 = _load("dimensions_user_2.txt").replace("{company_name}", company_name)
+    dimension_users = [
+        _load(f).replace("{company_name}", company_name)
+        for f in DIMENSION_FILES
+    ]
     financial_user = _load("financial_webscraper_user.txt").replace("{company_name}", company_name)
+
+    # Step keys: dimension_1 … dimension_N, financial_webscraper
+    dim_keys = [f"dimension_{i+1}" for i in range(len(DIMENSION_FILES))]
+    expected_steps = len(dim_keys) + 1  # + financial_webscraper
 
     results = {}
 
     if PARALLEL_LLM:
         tasks = {
-            "dimensions_1": asyncio.create_task(
-                _call(llm_dim, dimensions_system, dimensions_user_1)
-            ),
-            "dimensions_2": asyncio.create_task(
-                _call(llm_dim, dimensions_system, dimensions_user_2)
-            ),
-            "financial_webscraper": asyncio.create_task(
-                _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
-            ),
+            key: asyncio.create_task(_call(llm_dim, dimensions_system, u))
+            for key, u in zip(dim_keys, dimension_users)
         }
+        tasks["financial_webscraper"] = asyncio.create_task(
+            _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
+        )
 
         pending = set(tasks.values())
         task_to_name = {v: k for k, v in tasks.items()}
@@ -190,26 +205,29 @@ async def run_workflow_stream(company_name: str, config: dict):
                 except Exception as e:
                     yield json.dumps({"type": "step_error", "step": name, "message": str(e)})
     else:
-        for name, coro in [
-            ("dimensions_1", _call(llm_dim, dimensions_system, dimensions_user_1)),
-            ("dimensions_2", _call(llm_dim, dimensions_system, dimensions_user_2)),
-            ("financial_webscraper", _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)),
-        ]:
+        for key, u in zip(dim_keys, dimension_users):
             try:
-                data = await coro
-                results[name] = data
-                yield json.dumps({"type": "step_done", "step": name, "data": data})
+                data = await _call(llm_dim, dimensions_system, u)
+                results[key] = data
+                yield json.dumps({"type": "step_done", "step": key, "data": data})
             except Exception as e:
-                yield json.dumps({"type": "step_error", "step": name, "message": str(e)})
+                yield json.dumps({"type": "step_error", "step": key, "message": str(e)})
 
-    if len(results) == 3:
+        try:
+            data = await _call(llm_fin, _load("financial_webscraper_system.txt"), financial_user)
+            results["financial_webscraper"] = data
+            yield json.dumps({"type": "step_done", "step": "financial_webscraper", "data": data})
+        except Exception as e:
+            yield json.dumps({"type": "step_error", "step": "financial_webscraper", "message": str(e)})
+
+    if len(results) == expected_steps:
         yield json.dumps({"type": "step_start", "step": "synthesis"})
+        dimensions_combined = "\n\n".join(results[k] for k in dim_keys)
         synthesis_user = (
             _load("business_value_analyst_user.txt")
             .replace("{company_name}", company_name)
             .replace("{financial_webscraper}", results["financial_webscraper"])
-            .replace("{dimensions_1}", results["dimensions_1"])
-            .replace("{dimensions_2}", results["dimensions_2"])
+            .replace("{dimensions}", dimensions_combined)
         )
         try:
             synthesis = await _call(llm, _load("business_value_analyst_system.txt"), synthesis_user)
