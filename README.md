@@ -1,5 +1,7 @@
 # ICAT — Intelligent Client Analysis Tool
 
+> 🇩🇪 [Deutsche Version](README.de.md)
+
 A Capgemini-internal desktop tool that automates client opportunity research using LLMs. Given a company name, ICAT runs a multi-step AI pipeline — researching data governance maturity across 8 dimensions, extracting financial data, and synthesizing the top business value opportunities.
 
 ---
