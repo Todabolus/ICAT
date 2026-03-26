@@ -194,11 +194,12 @@ function saveHistory(entries) { localStorage.setItem(HISTORY_KEY, JSON.stringify
 
 function stepsFromEntry(entry) {
   const s = (v) => v ? 'done' : 'error'
+  // Support old history entries (dimensions_1/dimensions_2) and new (dimensions)
+  const dimData = entry.dimensions || [entry.dimensions_1, entry.dimensions_2].filter(Boolean).join('\n\n') || null
   return {
-    dimensions_1: { status: s(entry.dimensions_1), data: entry.dimensions_1 || null, error: null },
-    dimensions_2: { status: s(entry.dimensions_2), data: entry.dimensions_2 || null, error: null },
-    financial:    { status: s(entry.financial_webscraper), data: entry.financial_webscraper || null, error: null },
-    synthesis:    { status: s(entry.synthesis), data: entry.synthesis || null, error: null },
+    dimensions: { status: s(dimData), parts: dimData ? { all: dimData } : {}, error: null },
+    financial:  { status: s(entry.financial_webscraper), data: entry.financial_webscraper || null, error: null },
+    synthesis:  { status: s(entry.synthesis), data: entry.synthesis || null, error: null },
   }
 }
 
@@ -206,9 +207,11 @@ function stepsFromPendingEntry(entry) {
   const step = (v) => v
     ? { status: 'done', data: v, error: null }
     : { status: 'loading', data: null, error: null }
+  const dimData = entry.dimensions || [entry.dimensions_1, entry.dimensions_2].filter(Boolean).join('\n\n') || null
   return {
-    dimensions_1: step(entry.dimensions_1),
-    dimensions_2: step(entry.dimensions_2),
+    dimensions: dimData
+      ? { status: 'done', parts: { all: dimData }, error: null }
+      : { status: 'loading', parts: {}, error: null },
     financial:    step(entry.financial_webscraper),
     synthesis:    entry.synthesis
       ? { status: 'done', data: entry.synthesis, error: null }
@@ -220,6 +223,7 @@ async function readJobStream(res, updateHistory, setSteps, onJobId) {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  const dimensionParts = {}  // accumulates dimension_* results locally
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -235,31 +239,37 @@ async function readJobStream(res, updateHistory, setSteps, onJobId) {
         continue
       }
       if (event.type === 'step_done') {
-        if (event.step === 'dimensions_1')              updateHistory('dimensions_1', event.data)
-        else if (event.step === 'dimensions_2')         updateHistory('dimensions_2', event.data)
-        else if (event.step === 'financial_webscraper') updateHistory('financial_webscraper', event.data)
-        else if (event.step === 'synthesis')            updateHistory('synthesis', event.data)
-        setSteps(prev => {
-          if (!prev) return prev
-          const next = { ...prev }
-          if (event.step === 'dimensions_1')              next.dimensions_1 = { status: 'done', data: event.data, error: null }
-          else if (event.step === 'dimensions_2')         next.dimensions_2 = { status: 'done', data: event.data, error: null }
-          else if (event.step === 'financial_webscraper') next.financial = { status: 'done', data: event.data, error: null }
-          else if (event.step === 'synthesis')            next.synthesis = { status: 'done', data: event.data, error: null }
-          return next
-        })
+        if (event.step.startsWith('dimension_')) {
+          dimensionParts[event.step] = event.data
+          setSteps(prev => {
+            if (!prev) return prev
+            return { ...prev, dimensions: { ...prev.dimensions, parts: { ...dimensionParts } } }
+          })
+        } else if (event.step === 'financial_webscraper') {
+          updateHistory('financial_webscraper', event.data)
+          setSteps(prev => prev ? { ...prev, financial: { status: 'done', data: event.data, error: null } } : prev)
+        } else if (event.step === 'synthesis') {
+          updateHistory('synthesis', event.data)
+          setSteps(prev => prev ? { ...prev, synthesis: { status: 'done', data: event.data, error: null } } : prev)
+        }
       } else if (event.type === 'step_error') {
         setSteps(prev => {
           if (!prev) return prev
           const next = { ...prev }
-          if (event.step === 'dimensions_1')              next.dimensions_1 = { status: 'error', data: null, error: event.message }
-          else if (event.step === 'dimensions_2')         next.dimensions_2 = { status: 'error', data: null, error: event.message }
+          if (event.step.startsWith('dimension_'))
+            next.dimensions = { ...prev.dimensions, status: 'error', error: event.message }
           else if (event.step === 'financial_webscraper') next.financial = { status: 'error', data: null, error: event.message }
           else if (event.step === 'synthesis')            next.synthesis = { status: 'error', data: null, error: event.message }
           return next
         })
       } else if (event.type === 'step_start' && event.step === 'synthesis') {
-        setSteps(prev => prev ? { ...prev, synthesis: { status: 'loading', data: null, error: null } } : prev)
+        const combinedDimData = Object.values(dimensionParts).join('\n\n---\n\n')
+        if (combinedDimData) updateHistory('dimensions', combinedDimData)
+        setSteps(prev => prev ? {
+          ...prev,
+          dimensions: { ...prev.dimensions, status: prev.dimensions.status === 'error' ? 'error' : 'done' },
+          synthesis: { status: 'loading', data: null, error: null },
+        } : prev)
       }
     }
   }
@@ -719,13 +729,11 @@ function WorkflowCards({ steps, t, th, initialSummary, onSaveSummary, companyNam
     } finally { setPdfLoading(false) }
   }
 
-  const d1 = steps.dimensions_1
-  const d2 = steps.dimensions_2
-  const dimDone  = d1.status === 'done' && d2.status === 'done'
-  const dimError = (d1.status === 'error' || d2.status === 'error') && d1.status !== 'loading' && d2.status !== 'loading'
-  const dimStatus = dimDone ? 'done' : dimError ? 'error' : 'loading'
-  const dimErrorMsg = d1.error || d2.error
-  const dimContent = dimDone ? (d1.data || '') + (d2.data ? '\n\n---\n\n' + d2.data : '') : ''
+  const dimDone    = steps.dimensions.status === 'done'
+  const dimError   = steps.dimensions.status === 'error'
+  const dimStatus  = steps.dimensions.status
+  const dimErrorMsg = steps.dimensions.error
+  const dimContent = dimDone ? Object.values(steps.dimensions.parts).join('\n\n---\n\n') : ''
 
   return (
     <>
@@ -979,17 +987,16 @@ function MainApp({ onOpenSettings, th, theme, onToggleTheme, lang, onChangeLang,
     if (!companyName.trim()) return
     setError('')
     setSteps({
-      dimensions_1: { status: 'loading', data: null, error: null },
-      dimensions_2: { status: 'loading', data: null, error: null },
-      financial:    { status: 'loading', data: null, error: null },
-      synthesis:    { status: 'waiting', data: null, error: null },
+      dimensions: { status: 'loading', parts: {}, error: null },
+      financial:  { status: 'loading', data: null, error: null },
+      synthesis:  { status: 'waiting', data: null, error: null },
     })
 
     // Save entry immediately so it persists regardless of outcome
     const entryId = Date.now()
     const baseEntry = {
       id: entryId, company: companyName.trim(), timestamp: new Date().toISOString(),
-      dimensions_1: null, dimensions_2: null, financial_webscraper: null, synthesis: null, synthesis_summary: null,
+      dimensions: null, financial_webscraper: null, synthesis: null, synthesis_summary: null,
     }
     setHistory(prev => { const updated = [baseEntry, ...prev].slice(0, MAX_HISTORY); saveHistory(updated); return updated })
     setActiveId(entryId)
